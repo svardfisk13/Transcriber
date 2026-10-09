@@ -113,6 +113,26 @@ directly - no conversion step.
 | `json` | timestamped segments, full text, and the exact settings and timings of the run |
 
 Files are named after the recording and land beside it, or in `-o <dir>`.
+
+`--folder` (`-f`) instead gives each recording a folder of its own, named after
+it, and moves the recording in with its transcripts:
+
+```powershell
+transcribe --folder recording01.m4a
+```
+
+```
+recording01\recording01.m4a
+recording01\recording01.txt
+recording01\recording01.json
+```
+
+The recording moves only once its transcripts are written, so a failed run
+leaves it where it was. A `recording01.vocab.txt` moves with it; a shared
+`vocab.txt` stays put. Run `--folder` again on `recording01\recording01.m4a` and
+the transcripts are rewritten in place, not nested a level deeper. `--folder`
+cannot be combined with `-o`.
+
 Note that `.gitignore` excludes `*.txt`, `*.json`, `*.srt` and `*.vtt` so
 transcripts never get committed by accident.
 
@@ -148,6 +168,7 @@ backend and is ignored elsewhere.
 | `--condition-on-previous` | `off` | feed earlier text back as context |
 | `--formats` | `txt,json` | `txt`, `srt`, `vtt`, `json` |
 | `-o`, `--output-dir` | beside the input | where to write |
+| `-f`, `--folder` | off | move each recording into a folder named after it, with its transcripts |
 | `--no-minute-markers` | off | omit `[hh:mm:ss]` markers from the `.txt` |
 
 `--mode`, `--batch-size`, `--chunk-s` and `--overlap-s` apply to the

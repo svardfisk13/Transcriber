@@ -25,6 +25,7 @@ Examples
     transcribe -m large-v3-turbo --formats txt,srt talk.wav
     transcribe -m kb-medium -l sv intervju.mp3
     transcribe --vad off meeting.m4a          # keep every quiet passage
+    transcribe --folder meeting.m4a           # move it, with transcripts, into meeting
     transcribe --backend transformers --mode chunked --vad on x.mp3
 
 Model, language and silence filtering are asked for interactively when -m, -l
@@ -907,6 +908,36 @@ def find_vocab(audio_path: str) -> Optional[str]:
     return None
 
 
+def move_into_folder(audio_path: str, folder: str) -> bool:
+    """--folder: move a recording, and its <recording>.vocab.txt, into folder.
+
+    Called only once the transcripts are written, so a failed run leaves the
+    recording where it was. A shared vocab.txt stays put: other recordings
+    beside it still need it. Returns False if anything could not be moved.
+    """
+    src = os.path.abspath(audio_path)
+    moves = [src]
+    vocab = os.path.splitext(src)[0] + ".vocab.txt"
+    if os.path.isfile(vocab):
+        moves.append(vocab)
+    # the recording goes first: if it cannot move, its vocabulary stays with it
+    for f in moves:
+        dest = os.path.join(folder, os.path.basename(f))
+        if os.path.exists(dest):
+            # never overwrite: it may be a different take with the same name
+            print(f"  error: transcripts written, but not moving {f}: "
+                  f"{dest} already exists", file=sys.stderr)
+            return False
+        try:
+            shutil.move(f, dest)
+        except OSError as exc:  # e.g. still open in a media player
+            print(f"  error: transcripts written, but could not move {f}: {exc}",
+                  file=sys.stderr)
+            return False
+        print(f"  moved {f} to {folder}", file=sys.stderr)
+    return True
+
+
 def pick_device(requested: str, backend: str = "transformers") -> str:
     if requested != "auto":
         return requested
@@ -979,8 +1010,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("--formats", default="txt,json",
                    help="comma-separated: txt, srt, vtt, json "
                         "(default: txt,json - use --formats txt for text only)")
-    p.add_argument("-o", "--output-dir", default=None,
-                   help="default: alongside each input file")
+    where = p.add_mutually_exclusive_group()
+    where.add_argument("-o", "--output-dir", default=None,
+                       help="default: alongside each input file")
+    where.add_argument("-f", "--folder", action="store_true",
+                       help="move each recording into a folder named after it, "
+                            "and write its transcripts there")
     p.add_argument("--no-minute-markers", action="store_true",
                    help="omit [hh:mm:ss] markers from the .txt output")
     return p.parse_args(argv)
@@ -1135,14 +1170,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not segments:
             print("  produced no text", file=sys.stderr)
 
-        out_dir = args.output_dir or os.path.dirname(os.path.abspath(path))
+        audio_dir = os.path.dirname(os.path.abspath(path))
+        stem = os.path.splitext(os.path.basename(path))[0]
+        if not args.folder:
+            out_dir = args.output_dir or audio_dir
+        elif os.path.normcase(os.path.basename(audio_dir)) == os.path.normcase(stem):
+            # filed away by an earlier --folder run: write beside it rather
+            # than nesting recording01\recording01\
+            out_dir = audio_dir
+        else:
+            out_dir = os.path.join(audio_dir, stem)
         try:
             os.makedirs(out_dir, exist_ok=True)
         except OSError as exc:
             print(f"  error: cannot create {out_dir}: {exc}", file=sys.stderr)
             failures += 1
             continue
-        stem = os.path.splitext(os.path.basename(path))[0]
         meta = {
             "source": os.path.basename(path),
             "duration": round(duration, 2),
@@ -1181,6 +1224,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         except OSError as exc:  # full disk, read-only dir, locked file
             print(f"  error: could not write output for {path}: {exc}",
                   file=sys.stderr)
+            failures += 1
+            continue
+
+        if (args.folder and out_dir != audio_dir
+                and not move_into_folder(path, out_dir)):
             failures += 1
 
     return 1 if failures else 0
