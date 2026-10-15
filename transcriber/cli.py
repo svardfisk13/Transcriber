@@ -26,6 +26,7 @@ Examples
     transcribe -m kb-medium -l sv intervju.mp3
     transcribe --vad off meeting.m4a          # keep every quiet passage
     transcribe --folder meeting.m4a           # move it, with transcripts, into meeting
+    transcribe record                         # record a call; see record -h
     transcribe --backend transformers --mode chunked --vad on x.mp3
 
 Model, language and silence filtering are asked for interactively when -m, -l
@@ -1022,6 +1023,13 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    # `transcribe record` is a command of its own; anything else is a file to
+    # transcribe. A recording really called "record" can be passed as .\record
+    if argv[:1] == ["record"]:
+        from .record import main as record_main  # noqa: PLC0415
+
+        return record_main(argv[1:])
     args = parse_args(argv)
 
     formats = [f.strip().lower() for f in args.formats.split(",") if f.strip()]

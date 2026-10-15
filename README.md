@@ -136,6 +136,47 @@ cannot be combined with `-o`.
 Note that `.gitignore` excludes `*.txt`, `*.json`, `*.srt` and `*.vtt` so
 transcripts never get committed by accident.
 
+## Recording a meeting
+
+`transcribe record` records a Teams call (or anything else) from your own
+machine: your microphone, and whatever plays through your speakers or headset.
+Windows lets programs capture the latter directly (WASAPI loopback), so there is
+no virtual cable or driver to install.
+
+```powershell
+transcribe record                # until Ctrl+C; named by date, e.g. 2026-10-14_1400.opus
+transcribe record standup        # standup.opus
+transcribe --folder standup.opus # then transcribe it as usual
+```
+
+While it runs, a status line shows the time and a level meter for each side. An
+empty `call` bar while people are talking means the wrong output is being
+recorded.
+
+**Pick the devices Teams uses.** By default it records the Windows default
+microphone and speakers. If Teams talks to a headset, point it there - the
+choice is remembered, so this is once per device:
+
+```powershell
+transcribe record --list-devices
+transcribe record --mic 2 --speaker Jabra   # a number from the list, or part of a name
+transcribe record --mic default             # back to the Windows default
+```
+
+The file is stereo Opus, about 22 MB an hour: your microphone on the left, the
+call on the right. Transcription mixes them back down to one. It is written as
+it goes, so a crash or a closed window loses only the last second or so.
+
+Worth knowing:
+
+- **Use headphones.** On laptop speakers your microphone picks up the call as
+  well, so the other side is recorded twice, slightly apart. Teams removes that
+  echo from what it sends, but not from what this records.
+- **Teams' mute does not mute this.** Mute stops Teams sending your voice; the
+  microphone itself keeps recording.
+- **Tell people.** Unlike Teams' own recording, nobody else in the call is
+  shown that you are recording.
+
 ## Vocabulary
 
 Whisper mangles names it has never seen. Give it a list and they come out right:
