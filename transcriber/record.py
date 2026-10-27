@@ -26,6 +26,7 @@ import argparse
 import json
 import os
 import signal
+import struct
 import sys
 import threading
 import time
@@ -165,6 +166,48 @@ def list_devices(sc) -> None:
 # capture
 # --------------------------------------------------------------------------- #
 
+def _open_recorder(device):
+    """A soundcard recorder for device: mono float32 at RATE.
+
+    soundcard builds its stream format by editing the device's own mix
+    format, and asserts that one is a WAVEFORMATEXTENSIBLE. Bluetooth headsets
+    such as AirPods report a plain WAVEFORMATEX instead, so their microphone
+    failed with a bare AssertionError. Its cffi struct is also 4 bytes longer
+    than Windows' own, which is why it cannot simply build one from scratch.
+
+    So on Windows the format is packed here, byte for byte as Windows lays it
+    out, and the device's mix format is never consulted: shared mode with
+    AUTOCONVERTPCM converts rate and channels from whatever the device uses.
+    Asking for mono also leaves the downmix to Windows. Everything after
+    Initialize is soundcard's own, unchanged.
+    """
+    if sys.platform != "win32":
+        return device.recorder(samplerate=RATE, channels=1, blocksize=BUFFER)
+    from soundcard import mediafoundation as mf  # noqa: PLC0415
+
+    class Recorder(mf._Recorder):
+        def __init__(self, ptr, isloopback):
+            self._ptr = ptr
+            self.channelmap = [0]
+            # WAVEFORMATEX: IEEE float, 1 channel, RATE, 4 bytes a frame
+            fmt = mf._ffi.new("char[]", struct.pack(
+                "<HHIIHHH", 3, 1, RATE, RATE * 4, 4, 32, 0))
+            # the same stream flags soundcard uses: rate adjust, nopersist,
+            # default-quality resampler, auto-convert - plus loopback
+            flags = 0x00100000 | 0x00080000 | 0x08000000 | 0x80000000
+            if isloopback:
+                flags |= 0x00020000
+            hr = ptr[0][0].lpVtbl.Initialize(
+                ptr[0], mf._ole32.AUDCLNT_SHAREMODE_SHARED, flags,
+                int(BUFFER / RATE * 10_000_000), 0,
+                mf._ffi.cast("WAVEFORMATEXTENSIBLE *", fmt), mf._ffi.NULL)
+            mf._com.check_error(hr)
+            self.samplerate = RATE
+            self._idle_start_time = None
+
+    return Recorder(device._audio_client(), device.isloopback)
+
+
 def _capture(device, t0: float, out: Queue, stop: threading.Event,
              errors: List[str]) -> None:
     """Record one device to mono blocks, held to the wall clock.
@@ -179,8 +222,7 @@ def _capture(device, t0: float, out: Queue, stop: threading.Event,
     nothing plays, and soundcard already returns zeros for that time.
     """
     try:
-        with device.recorder(samplerate=RATE, channels=device.channels,
-                             blocksize=BUFFER) as rec:
+        with _open_recorder(device) as rec:
             emitted = 0
             nudging = False
             first = True
@@ -205,7 +247,8 @@ def _capture(device, t0: float, out: Queue, stop: threading.Event,
                 out.put(block.astype(np.float32, copy=False))
                 emitted += len(block)
     except Exception as exc:  # noqa: BLE001 - e.g. the headset was unplugged
-        errors.append(f"{device.name}: {exc}")
+        # a bare assert has no message, and printed as nothing at all
+        errors.append(f"{device.name}: {str(exc) or type(exc).__name__}")
         stop.set()
 
 
@@ -374,8 +417,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     duration, errors = record(mic, loopback, path)
     for err in errors:
         print(f"  error: recording stopped: {err}", file=sys.stderr)
-    print(f"Saved {path} ({_fmt(duration)})", file=sys.stderr)
-    if duration > 0:
-        print(f"Transcribe it with:  transcribe --folder \"{path}\"",
-              file=sys.stderr)
+    if duration < 1:
+        # a device that failed to open, or Ctrl+C straight away: an empty
+        # file would only have to be found and deleted by hand
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        print("Nothing recorded.", file=sys.stderr)
+        return 1 if errors else 0
+    print(f"Saved {path} ({_fmt(duration)})\n"
+          f"Transcribe it with:  transcribe --folder \"{path}\"", file=sys.stderr)
     return 1 if errors else 0

@@ -25,7 +25,7 @@ dependencies = [
     "faster-whisper>=1.0.2", # 1.0.2 added `hotwords`, which --vocab relies on
     "av>=10",                # in-process decoding; bundles ffmpeg's libraries
     "tqdm>=4.62",            # progress bar with a realtime-factor ETA
-    "soundcard>=0.4.6",      # `transcribe record`: microphone and WASAPI loopback
+    "soundcard>=0.4.6,<0.5", # `transcribe record`; record.py subclasses its internals
 ]
 
 dynamic = ["version"]
