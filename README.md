@@ -17,6 +17,8 @@ built for hour-long material - meetings, interviews, talks - where the usual
   speech out to a full window with silence.
 - **Names come out right.** `--vocab` biases decoding toward the people,
   products and jargon in your recording.
+- **Records the meeting too.** `transcribe record` captures your microphone and
+  the other side of a Teams call on Windows, with no virtual cable or driver.
 
 ## Install
 
@@ -27,8 +29,10 @@ Python 3.9 or newer. No ffmpeg, and no model downloads at install time.
 
 ```powershell
 py -m pip install --user pipx
-pipx install git+https://github.com/oppenheimer13/Transcriber
+pipx install git+https://github.com/svardfisk13/Transcriber
 ```
+
+`pipx reinstall transcriber` later fetches the latest code from GitHub.
 
 **To work on it** - an editable install, so your edits take effect immediately:
 
@@ -37,6 +41,10 @@ py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 py -m pip install -e .
 ```
+
+`transcribe` is then available while the venv is active (the prompt shows
+`(.venv)`), from any folder. It runs the code of whichever branch is checked
+out, so switching to a branch switches the tool with it.
 
 Either way the dependencies come down automatically. `pip install -r
 requirements.txt` still works and does the same as the editable install.
@@ -146,16 +154,25 @@ no virtual cable or driver to install.
 ```powershell
 transcribe record                # until Ctrl+C; named by date, e.g. 2026-10-14_1400.opus
 transcribe record standup        # standup.opus
-transcribe --folder standup.opus # then transcribe it as usual
+transcribe record standup -o D:\Minutes   # into another folder, created if missing
+transcribe --folder D:\Minutes\standup.opus   # then transcribe it as usual
 ```
 
-While it runs, a status line shows the time and a level meter for each side. An
-empty `call` bar while people are talking means the wrong output is being
+Without `-o` the recording lands in the folder the terminal is in. Both the
+start and the end of a run print where it is, and the end prints the command
+to transcribe it. A run that records less than a second - a device that would
+not open, or Ctrl+C straight away - leaves no file behind.
+
+While it runs, a status line shows the time and a level meter for each side:
+`mic` is you, `call` is everyone else. Each bar fills as that side gets louder.
+An empty `call` bar while people are talking means the wrong output is being
 recorded.
 
-**Pick the devices Teams uses.** By default it records the Windows default
-microphone and speakers. If Teams talks to a headset, point it there - the
-choice is remembered, so this is once per device:
+### Picking the microphone and speakers
+
+By default it records the Windows default microphone and speakers. If Teams
+talks to a headset, point it there. The choice is remembered (in
+`%APPDATA%\transcriber\devices.json`), so this is once per device:
 
 ```powershell
 transcribe record --list-devices
@@ -163,11 +180,53 @@ transcribe record --mic 2 --speaker Jabra   # a number from the list, or part of
 transcribe record --mic default             # back to the Windows default
 ```
 
-The file is stereo Opus, about 22 MB an hour: your microphone on the left, the
-call on the right. Transcription mixes them back down to one. It is written as
-it goes, so a crash or a closed window loses only the last second or so.
+Change one and the other stays as it was. A remembered device that is not
+connected - headset left at home - is skipped with a note, and the Windows
+default is used for that recording only. Prefer names to numbers: the numbers
+shift as devices come and go.
 
-Worth knowing:
+Check **Teams > Settings > Devices**: record the same speaker and microphone
+Teams is using.
+
+**Bluetooth headsets (AirPods and the like).** Pick the headset for both:
+
+```powershell
+transcribe record --mic AirPods --speaker AirPods
+```
+
+Windows 11 lists it once in each list - a `Headset` microphone and a
+`Headphones` output - and switches it into call mode by itself when the
+microphone is in use. Older Windows lists the call mode as a separate
+*Hands-Free* device; pick that one for both, since the stereo device goes
+silent during a call. Call mode is narrowband, roughly phone quality, which
+costs the transcript very little. Connect the headset before you start: if it
+disconnects mid-meeting, the recording stops and keeps what it has.
+
+### Back-to-back meetings
+
+Recording and transcribing are separate steps on purpose. Transcription is
+heavy on the CPU, and running it during the next call could hurt Teams and
+make the recorder drop audio. Record all day, then transcribe everything in
+one go, with one load of the model:
+
+```powershell
+transcribe --folder -m kb-large -l sv --vad off (gci D:\Minutes\*.opus)
+```
+
+`--folder` moves each finished recording into a folder of its own, so any
+`.opus` still loose in `D:\Minutes` is one not yet transcribed, and the same
+command next time picks up exactly what is left.
+
+### The file
+
+Stereo Opus, about 22 MB an hour: your microphone on the left, the call on the
+right. Transcription mixes them back down to one. It is written as it goes, so
+a crash or a closed window loses only the last second or so. Windows' Media
+Player, VLC and browsers play it; some other apps, Apple's in particular, may
+not. `.gitignore` excludes `*.opus`, so a recording made inside the project is
+never committed.
+
+### Worth knowing
 
 - **Use headphones.** On laptop speakers your microphone picks up the call as
   well, so the other side is recorded twice, slightly apart. Teams removes that
@@ -188,9 +247,21 @@ transcribe --vocab @terms.txt meeting.m4a
 
 With no `--vocab`, it looks for `<recording>.vocab.txt` and then
 `vocab.txt` beside the audio, and uses the first it finds. One term per line,
-saved as UTF-8; `#` starts a comment. Terms are passed as faster-whisper *hotwords*, so they
-bias every window rather than just the first - this needs the faster-whisper
-backend and is ignored elsewhere.
+saved as UTF-8; `#` starts a comment. It must be named exactly that: other
+`.txt` files beside the audio - transcripts among them - are not read. Terms
+are passed as faster-whisper *hotwords*, so they bias every window rather than
+just the first - this needs the faster-whisper backend and is ignored
+elsewhere.
+
+A `vocab.txt` in the folder you record into covers every meeting there. One
+catch with `--folder`: the recording moves into a subfolder but a shared
+`vocab.txt` stays put, so to transcribe it again later, name the file:
+
+```powershell
+transcribe --vocab "@D:\Minutes\vocab.txt" "D:\Minutes\standup\standup.opus"
+```
+
+A `<recording>.vocab.txt` moves with its recording and has no such catch.
 
 ## Options
 
@@ -211,6 +282,16 @@ backend and is ignored elsewhere.
 | `-o`, `--output-dir` | beside the input | where to write |
 | `-f`, `--folder` | off | move each recording into a folder named after it, with its transcripts |
 | `--no-minute-markers` | off | omit `[hh:mm:ss]` markers from the `.txt` |
+
+`transcribe record` takes its own options (`transcribe record -h`):
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `name` | date and time | file name; `.opus` is added |
+| `-o`, `--output-dir` | the current folder | where to write |
+| `--mic` | remembered, else Windows default | number from `--list-devices`, part of a name, or `default` |
+| `--speaker` | remembered, else Windows default | the output to record the call from; same forms as `--mic` |
+| `--list-devices` | | show microphones and speakers, then exit |
 
 `--mode`, `--batch-size`, `--chunk-s` and `--overlap-s` apply to the
 transformers backend only; `transcribe -h` covers them. `--chunk-s`
@@ -257,9 +338,27 @@ since it gets an environment of its own.
 per-window hook, so it prints an elapsed-time heartbeat every minute instead of
 a bar. The default faster-whisper backend shows a real progress bar.
 
-**`transcribe` is not recognised.** The `pipx` install puts it on your PATH, but
-an open terminal will not pick that up until you restart it. `pipx ensurepath`
-fixes a PATH that never got set up.
+**`transcribe` is not recognised.** With the editable install, activate the
+venv first: `.\.venv\Scripts\Activate.ps1` in the project folder. The `pipx`
+install puts it on your PATH, but an open terminal will not pick that up until
+you restart it; `pipx ensurepath` fixes a PATH that never got set up.
+
+**The `call` meter stays empty.** The call is playing through a different output
+than the one being recorded. Compare `transcribe record --list-devices` with
+Teams > Settings > Devices, and pick the right one with `--speaker`.
+
+**"the microphone has recorded pure silence".** Windows hands out silence rather
+than an error when its privacy settings block desktop apps from the microphone:
+check Settings > Privacy & security > Microphone. Otherwise the wrong
+microphone is picked; see `--list-devices`.
+
+**"recording stopped: <device>".** The device went away mid-recording -
+unplugged, or a Bluetooth headset out of range or out of battery. What was
+recorded up to then is saved; start a new recording to carry on.
+
+**"transcripts written, but could not move".** With `--folder`, something held
+the recording open at the moment it was moved - often OneDrive syncing it. The
+transcripts are in the new folder; move the recording in by hand.
 
 ## License
 

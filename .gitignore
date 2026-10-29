@@ -26,6 +26,7 @@ venv/
 
 # Audio/video input
 *.m4a
+*.opus
 *.mp3
 *.wav
 *.mp4

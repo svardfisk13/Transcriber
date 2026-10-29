@@ -13,7 +13,7 @@ Backends
                                            silence with Silero VAD
 
 Install
-    pipx install git+https://github.com/oppenheimer13/Transcriber
+    pipx install git+https://github.com/svardfisk13/Transcriber
     pip install -e .[transformers]    # only for --backend transformers
     pip install -e .[vad]             # only for --vad on with that backend
     Decoding needs no external ffmpeg: PyAV bundles the ffmpeg libraries.

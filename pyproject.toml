@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "transcriber"
-description = "Long-form speech transcription with Whisper, from the command line"
+description = "Long-form speech transcription with Whisper, and meeting recording, from the command line"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Robert Hajas" }]
-keywords = ["whisper", "transcription", "speech-to-text", "subtitles", "swedish"]
+keywords = ["whisper", "transcription", "speech-to-text", "subtitles", "swedish", "recording", "teams"]
 classifiers = [
     "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
