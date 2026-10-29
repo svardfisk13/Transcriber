@@ -199,8 +199,29 @@ Windows 11 lists it once in each list - a `Headset` microphone and a
 microphone is in use. Older Windows lists the call mode as a separate
 *Hands-Free* device; pick that one for both, since the stereo device goes
 silent during a call. Call mode is narrowband, roughly phone quality, which
-costs the transcript very little. Connect the headset before you start: if it
-disconnects mid-meeting, the recording stops and keeps what it has.
+costs the transcript very little. Connect the headset before you start.
+
+### If a device goes away mid-meeting
+
+A headset out of battery or out of range stops the recording; it does not
+quietly switch to another microphone. What was recorded is saved, it beeps
+twice - you are looking at Teams, not the terminal - and it prints the command
+that records the rest into a new file beside it:
+
+```
+Recording stopped at 00:42:10: Headset (AirPods Pro) was disconnected.
+Saved D:\Minutes\standup.opus (00:42:10)
+Transcribe it with:  transcribe --folder "D:\Minutes\standup.opus"
+Record the rest with:  transcribe record "standup-2" -o "D:\Minutes"
+```
+
+The remembered headset is gone, so that command records on the Windows default
+until it is back.
+
+Windows does not always report a disconnect as one: a Bluetooth microphone can
+stay listed and simply deliver nothing. A live microphone is never perfectly
+silent, so ten seconds of exact silence after real sound also beeps, with a
+warning; that recording carries on, in case it is only muted.
 
 ### Back-to-back meetings
 
@@ -352,9 +373,20 @@ than an error when its privacy settings block desktop apps from the microphone:
 check Settings > Privacy & security > Microphone. Otherwise the wrong
 microphone is picked; see `--list-devices`.
 
-**"recording stopped: <device>".** The device went away mid-recording -
-unplugged, or a Bluetooth headset out of range or out of battery. What was
-recorded up to then is saved; start a new recording to carry on.
+**"Recording stopped at ...: <device> was disconnected".** It went away
+mid-recording - unplugged, or a Bluetooth headset out of range or out of
+battery. What was recorded is saved; run the `Record the rest with` command it
+prints to carry on. See [If a device goes away mid-meeting](#if-a-device-goes-away-mid-meeting).
+
+**"the microphone has been completely silent since ... - disconnected or
+muted?"** It had picked up sound and then went perfectly silent: a headset that
+dropped without Windows reporting it, or a hardware mute (a mute key, or the
+headset's own). The recording carries on. Unmute or reconnect, and it notes when
+sound comes back. If the headset is gone for good, Ctrl+C and start again.
+
+**"Could not record: <device> failed".** The device would not open. Check that
+it is connected and not in use exclusively by another program, or pick another
+with `--mic` / `--speaker`.
 
 **"transcripts written, but could not move".** With `--folder`, something held
 the recording open at the moment it was moved - often OneDrive syncing it. The

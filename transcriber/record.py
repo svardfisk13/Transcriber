@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import struct
 import sys
@@ -46,6 +47,8 @@ SETTLE = RATE * 10 // 1000  # back within 10 ms: stop nudging
 STEP = RATE // 1000         # nudge by 1 ms per block - inaudible in speech
 HARD = RATE // 4            # 250 ms off: a real gap, not drift - fix it at once
 BITRATE = 48_000         # Opus, both channels: about 22 MB an hour
+DEVICE_GONE = "0x88890004"  # AUDCLNT_E_DEVICE_INVALIDATED, as soundcard words it
+MIC_GONE_S = 10          # this long of exact zeros from a mic that had sound
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -248,8 +251,24 @@ def _capture(device, t0: float, out: Queue, stop: threading.Event,
                 emitted += len(block)
     except Exception as exc:  # noqa: BLE001 - e.g. the headset was unplugged
         # a bare assert has no message, and printed as nothing at all
-        errors.append(f"{device.name}: {str(exc) or type(exc).__name__}")
+        msg = str(exc) or type(exc).__name__
+        if DEVICE_GONE in msg:
+            errors.append(f"{device.name} was disconnected")
+        else:
+            errors.append(f"{device.name} failed: {msg}")
         stop.set()
+
+
+def _alert() -> None:
+    """Two beeps. In a call nobody is watching this terminal, so a recording
+    that stops or goes deaf has to be heard."""
+    try:
+        import winsound  # noqa: PLC0415
+
+        for _ in range(2):
+            winsound.Beep(880, 250)  # plays even with Windows' sounds turned off
+    except Exception:  # noqa: BLE001 - not Windows, or no sound device left
+        print("\a", end="", file=sys.stderr, flush=True)
 
 
 def _meter(peak: float, width: int = 10) -> str:
@@ -309,6 +328,8 @@ def record(mic, loopback, path: str) -> Tuple[float, List[str]]:
     peaks = [0.0, 0.0]
     written = 0
     mic_heard = False
+    mic_sound_at = 0.0
+    mic_gone = False
     hinted = False
     tty = sys.stderr.isatty()
     last_status = 0.0
@@ -317,6 +338,7 @@ def record(mic, loopback, path: str) -> Tuple[float, List[str]]:
             t.start()
         while True:
             stopping = stop.is_set()
+            now = time.perf_counter()
             for i, q in enumerate(queues):
                 while True:
                     try:
@@ -325,6 +347,8 @@ def record(mic, loopback, path: str) -> Tuple[float, List[str]]:
                         break
                     if len(block):
                         peaks[i] = max(peaks[i], float(np.abs(block).max()))
+                        if i == 0 and np.any(block):
+                            mic_heard, mic_sound_at = True, now
                     pending[i] = np.concatenate([pending[i], block])
             if stopping:
                 # one track can be a block behind the other: pad, don't drop
@@ -332,7 +356,6 @@ def record(mic, loopback, path: str) -> Tuple[float, List[str]]:
                 pending = [np.pad(b, (0, n - len(b))) for b in pending]
             n = min(len(b) for b in pending)
             if n:
-                mic_heard = mic_heard or peaks[0] > 0
                 stereo = np.stack([pending[0][:n], pending[1][:n]], axis=1)
                 frame = av.AudioFrame.from_ndarray(
                     np.clip(stereo, -1, 1).reshape(1, -1), format="flt",
@@ -344,7 +367,21 @@ def record(mic, loopback, path: str) -> Tuple[float, List[str]]:
                 written += n
                 pending = [b[n:] for b in pending]
 
-            now = time.perf_counter()
+            # A live microphone never gives exact zeros - there is always some
+            # noise floor - so after real sound they mean it went away. Not
+            # every disconnect is an error: a Bluetooth one can leave the
+            # device in place, delivering nothing, and the call would go on
+            # being recorded with one side deaf.
+            if mic_heard and not mic_gone and now - mic_sound_at > MIC_GONE_S:
+                print(f"\n  warning: the microphone has been completely silent "
+                      f"since {_fmt(written / RATE - MIC_GONE_S)} - disconnected "
+                      "or muted? Still recording", file=sys.stderr)
+                _alert()
+                mic_gone = True
+            elif mic_gone and now - mic_sound_at < 1:
+                print("\n  note: the microphone is picking up sound again",
+                      file=sys.stderr)
+                mic_gone = False
             if not hinted and not mic_heard and written > 10 * RATE:
                 # Windows hands out silence, not an error, when its privacy
                 # settings block desktop apps from the microphone
@@ -415,17 +452,44 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
           "Ctrl+C to stop.", file=sys.stderr)
 
     duration, errors = record(mic, loopback, path)
-    for err in errors:
-        print(f"  error: recording stopped: {err}", file=sys.stderr)
     if duration < 1:
         # a device that failed to open, or Ctrl+C straight away: an empty
         # file would only have to be found and deleted by hand
+        for err in errors:
+            print(f"Could not record: {err}.", file=sys.stderr)
         try:
             os.remove(path)
         except OSError:
             pass
         print("Nothing recorded.", file=sys.stderr)
         return 1 if errors else 0
+    for err in errors:
+        print(f"Recording stopped at {_fmt(duration)}: {err}.", file=sys.stderr)
     print(f"Saved {path} ({_fmt(duration)})\n"
           f"Transcribe it with:  transcribe --folder \"{path}\"", file=sys.stderr)
+    if errors:
+        print(f"Record the rest with:  {_next_command(args, path)}",
+              file=sys.stderr)
+        _alert()
     return 1 if errors else 0
+
+
+def _next_command(args: argparse.Namespace, path: str) -> str:
+    """The command that carries on in a new file next to the stopped one.
+
+    A remembered device that is gone falls back to the Windows default on
+    its own, so the same command records on whatever is left.
+    """
+    folder = os.path.dirname(path)
+    cmd = "transcribe record"
+    if args.name:
+        # standup -> standup-2, and standup-2 -> standup-3, not standup-2-2
+        base = os.path.splitext(os.path.basename(path))[0]
+        n = 2
+        m = re.fullmatch(r"(.*)-(\d{1,2})", base)  # not a date like -20261029
+        if m:
+            base, n = m.group(1), int(m.group(2)) + 1
+        while os.path.exists(os.path.join(folder, f"{base}-{n}.opus")):
+            n += 1
+        cmd += f' "{base}-{n}"'
+    return cmd + f' -o "{folder}"'
