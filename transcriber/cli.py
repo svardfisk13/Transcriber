@@ -2,6 +2,9 @@
 """
 transcribe - long-form speech transcription with Whisper.
 
+Recording a meeting is a command of its own: transcribe record
+(its options: transcribe record -h)
+
 Backends
     faster-whisper  CTranslate2 build, roughly 4x faster than transformers on
                     CPU at equal accuracy. Used automatically when installed.

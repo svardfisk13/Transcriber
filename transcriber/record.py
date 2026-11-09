@@ -59,7 +59,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     p.add_argument("name", nargs="?", default=None,
                    help="file name, .opus added (default: date and time, "
-                        "e.g. 2026-10-14_1400)")
+                        "e.g. 20261014-1400)")
     p.add_argument("-o", "--output-dir", default=None,
                    help="default: the current folder")
     p.add_argument("--mic", default=None, metavar="DEVICE",
@@ -294,7 +294,7 @@ def _output_path(args: argparse.Namespace) -> str:
         return path
     # two recordings started in the same minute get -2, -3 rather than
     # clobbering each other
-    stem = os.path.join(folder, datetime.now().strftime("%Y-%m-%d_%H%M"))
+    stem = os.path.join(folder, datetime.now().strftime("%Y%m%d-%H%M"))
     path, n = stem + ".opus", 2
     while os.path.exists(path):
         path, n = f"{stem}-{n}.opus", n + 1

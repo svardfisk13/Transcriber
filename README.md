@@ -152,7 +152,7 @@ Windows lets programs capture the latter directly (WASAPI loopback), so there is
 no virtual cable or driver to install.
 
 ```powershell
-transcribe record                # until Ctrl+C; named by date, e.g. 2026-10-14_1400.opus
+transcribe record                # until Ctrl+C; named by date, e.g. 20261014-1400.opus
 transcribe record standup        # standup.opus
 transcribe record standup -o D:\Minutes   # into another folder, created if missing
 transcribe --folder D:\Minutes\standup.opus   # then transcribe it as usual
