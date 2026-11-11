@@ -166,24 +166,31 @@ not open, or Ctrl+C straight away - leaves no file behind.
 While it runs, a status line shows the time and a level meter for each side:
 `mic` is you, `call` is everyone else. Each bar fills as that side gets louder.
 An empty `call` bar while people are talking means the wrong output is being
-recorded.
+recorded. Nobody watches the terminal during a call, so if the call side has
+been all but silent for the first two minutes it also beeps, with a warning
+naming the output it is listening to.
 
 ### Picking the microphone and speakers
 
 By default it records the Windows default microphone and speakers. If Teams
-talks to a headset, point it there. The choice is remembered (in
-`%APPDATA%\transcriber\devices.json`), so this is once per device:
+talks to a headset, point it there. Choosing is a step of its own: it records
+nothing, and shows the list again with the choice marked `(remembered)`. The
+choice is kept (in `%APPDATA%\transcriber\devices.json`), so a plain
+`transcribe record` uses it from then on:
 
 ```powershell
 transcribe record --list-devices
 transcribe record --mic 2 --speaker Jabra   # a number from the list, or part of a name
 transcribe record --mic default             # back to the Windows default
+transcribe record                           # then record
 ```
 
 Change one and the other stays as it was. A remembered device that is not
 connected - headset left at home - is skipped with a note, and the Windows
-default is used for that recording only. Prefer names to numbers: the numbers
-shift as devices come and go.
+default is used for that recording only. Watch for that note: plugging in a
+display often makes it the Windows default output while Teams keeps playing
+through the laptop, and the call side then records nothing. Prefer names to
+numbers: the numbers shift as devices come and go.
 
 Check **Teams > Settings > Devices**: record the same speaker and microphone
 Teams is using.
@@ -192,6 +199,7 @@ Teams is using.
 
 ```powershell
 transcribe record --mic AirPods --speaker AirPods
+transcribe record
 ```
 
 Windows 11 lists it once in each list - a `Headset` microphone and a
@@ -310,7 +318,7 @@ A `<recording>.vocab.txt` moves with its recording and has no such catch.
 | --- | --- | --- |
 | `name` | date and time | file name; `.opus` is added |
 | `-o`, `--output-dir` | the current folder | where to write |
-| `--mic` | remembered, else Windows default | number from `--list-devices`, part of a name, or `default` |
+| `--mic` | remembered, else Windows default | choose and remember, without recording: number from `--list-devices`, part of a name, or `default` |
 | `--speaker` | remembered, else Windows default | the output to record the call from; same forms as `--mic` |
 | `--list-devices` | | show microphones and speakers, then exit |
 
@@ -364,9 +372,12 @@ venv first: `.\.venv\Scripts\Activate.ps1` in the project folder. The `pipx`
 install puts it on your PATH, but an open terminal will not pick that up until
 you restart it; `pipx ensurepath` fixes a PATH that never got set up.
 
-**The `call` meter stays empty.** The call is playing through a different output
-than the one being recorded. Compare `transcribe record --list-devices` with
-Teams > Settings > Devices, and pick the right one with `--speaker`.
+**The `call` meter stays empty, or "hardly a sound from the call in 2
+minutes".** The call is playing through a different output than the one being
+recorded - often a display that became the Windows default while a remembered
+headset was not connected. Compare the `call:` line at the start with Teams >
+Settings > Devices. Ctrl+C, pick the right one with `--speaker`, and start
+again; if the call comes through after all, it says so and keeps recording.
 
 **"the microphone has recorded pure silence".** Windows hands out silence rather
 than an error when its privacy settings block desktop apps from the microphone:

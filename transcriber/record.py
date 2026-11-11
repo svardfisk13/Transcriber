@@ -14,7 +14,7 @@ Examples
     transcribe record                       # named by date and time
     transcribe record standup               # standup.opus
     transcribe record --list-devices
-    transcribe record --mic 2 --speaker Jabra   # remembered for next time
+    transcribe record --mic 2 --speaker Jabra   # choose and remember; records nothing
 
 Your microphone is recorded even while you are muted in Teams: Teams' mute
 only stops it sending your voice, not the device capturing it.
@@ -49,6 +49,9 @@ HARD = RATE // 4            # 250 ms off: a real gap, not drift - fix it at once
 BITRATE = 48_000         # Opus, both channels: about 22 MB an hour
 DEVICE_GONE = "0x88890004"  # AUDCLNT_E_DEVICE_INVALIDATED, as soundcard words it
 MIC_GONE_S = 10          # this long of exact zeros from a mic that had sound
+CALL_SILENT_S = 120      # by now a call has been heard, unless it plays elsewhere
+CALL_HEARD_S = 5         # more than a few Windows notification sounds add up to
+CALL_LEVEL = 0.01        # -40 dBFS: a block above this has sound in it
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -63,14 +66,19 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("-o", "--output-dir", default=None,
                    help="default: the current folder")
     p.add_argument("--mic", default=None, metavar="DEVICE",
-                   help="number from --list-devices or part of the name; "
-                        "'default' for the Windows default. Remembered")
+                   help="choose the microphone and remember it, without "
+                        "recording: number from --list-devices, part of the "
+                        "name, or 'default' for the Windows default")
     p.add_argument("--speaker", default=None, metavar="DEVICE",
-                   help="the output Teams plays the call through, recorded by "
-                        "loopback. Same forms as --mic. Remembered")
+                   help="choose the output Teams plays the call through, the "
+                        "same way; it is recorded by loopback")
     p.add_argument("--list-devices", action="store_true",
                    help="show microphones and speakers, then exit")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if (args.mic or args.speaker) and (args.name or args.output_dir):
+        p.error("--mic and --speaker only choose the devices; record with a "
+                "separate `transcribe record`")
+    return args
 
 
 # --------------------------------------------------------------------------- #
@@ -330,6 +338,8 @@ def record(mic, loopback, path: str) -> Tuple[float, List[str]]:
     mic_heard = False
     mic_sound_at = 0.0
     mic_gone = False
+    call_sound_s = 0.0
+    call_warned = False
     hinted = False
     tty = sys.stderr.isatty()
     last_status = 0.0
@@ -346,9 +356,12 @@ def record(mic, loopback, path: str) -> Tuple[float, List[str]]:
                     except Empty:
                         break
                     if len(block):
-                        peaks[i] = max(peaks[i], float(np.abs(block).max()))
-                        if i == 0 and np.any(block):
+                        peak = float(np.abs(block).max())
+                        peaks[i] = max(peaks[i], peak)
+                        if i == 0 and peak > 0:
                             mic_heard, mic_sound_at = True, now
+                        if i == 1 and peak > CALL_LEVEL:
+                            call_sound_s += len(block) / RATE
                     pending[i] = np.concatenate([pending[i], block])
             if stopping:
                 # one track can be a block behind the other: pad, don't drop
@@ -382,6 +395,22 @@ def record(mic, loopback, path: str) -> Tuple[float, List[str]]:
                 print("\n  note: the microphone is picking up sound again",
                       file=sys.stderr)
                 mic_gone = False
+            # Loopback records one output, and Teams may be playing through
+            # another - the display just plugged in became the Windows default,
+            # say. Only Windows' notification sounds reach this one then, so
+            # the test is how much sound came through, not whether any did.
+            # Asked once, at the start: later on, a quiet call is just quiet.
+            if (not call_warned and call_sound_s < CALL_HEARD_S
+                    and written > CALL_SILENT_S * RATE):
+                print(f"\n  warning: hardly a sound from the call in "
+                      f"{CALL_SILENT_S // 60} minutes - is Teams playing through "
+                      f"{loopback.name}? Check Teams > Settings > Devices. "
+                      "Still recording", file=sys.stderr)
+                _alert()
+                call_warned = True
+            elif call_warned and call_sound_s >= CALL_HEARD_S:
+                print("\n  note: the call is coming through now", file=sys.stderr)
+                call_warned = False  # and the sound so far rules out a second warning
             if not hinted and not mic_heard and written > 10 * RATE:
                 # Windows hands out silence, not an error, when its privacy
                 # settings block desktop apps from the microphone
@@ -425,14 +454,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # would only break up the status line
     warnings.filterwarnings("ignore", message="data discontinuity")
 
+    choices = _load_choices()
+    if args.mic or args.speaker:
+        # choosing is a step of its own: a recording never starts on a device
+        # picked by a typo, and the list shows what is now remembered
+        if args.mic:
+            _choose("mic", args.mic, sc.all_microphones(),
+                    sc.default_microphone(), choices)
+        if args.speaker:
+            _choose("speaker", args.speaker, sc.all_speakers(),
+                    sc.default_speaker(), choices)
+        list_devices(sc)
+        print("Saved. Record with:  transcribe record")
+        return 0
     if args.list_devices:
         list_devices(sc)
         return 0
 
-    choices = _load_choices()
-    mic = _choose("mic", args.mic, sc.all_microphones(),
+    mic = _choose("mic", None, sc.all_microphones(),
                   sc.default_microphone(), choices)
-    speaker = _choose("speaker", args.speaker, sc.all_speakers(),
+    speaker = _choose("speaker", None, sc.all_speakers(),
                       sc.default_speaker(), choices)
     if mic is None:
         raise SystemExit("No microphone found.")
